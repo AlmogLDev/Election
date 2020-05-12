@@ -6,8 +6,8 @@
 #include "area.h"
 
 
-#define MAX_DIGITS_INT 10
-
+#define MAX_DIGITS_INT 12
+#define NO_TRIBES -1
 
 struct election_t{
 
@@ -71,9 +71,15 @@ ElectionResult electionAddTribe (Election election, int tribe_id, const char* tr
         return ELECTION_INVALID_NAME;
     }
 
-   if (mapPut(election->tribes, tribe_id_new, tribe_name) != MAP_SUCCESS){
-       electionDestroy(election);
-       return ELECTION_OUT_OF_MEMORY;
+   MapResult map_result = mapPut(election->tribes, tribe_id_new, tribe_name);
+
+   if (map_result != MAP_SUCCESS){
+       if (map_result == MAP_OUT_OF_MEMORY){
+           return ELECTION_OUT_OF_MEMORY;
+       }
+       if (map_result == MAP_NULL_ARGUMENT){
+           return ELECTION_ERROR;
+       }
    }
 
    AreaResult result = addTribe(election->area_votes, tribe_id);
@@ -104,9 +110,15 @@ ElectionResult electionAddArea(Election election, int area_id, const char* area_
         return ELECTION_INVALID_NAME;
     }
 
-    if (mapPut(election->areas, area_id_new, area_name) != MAP_SUCCESS){
-        electionDestroy(election);
-        return ELECTION_OUT_OF_MEMORY;
+    MapResult map_result = mapPut(election->areas, area_id_new, area_name);
+    if (map_result != MAP_SUCCESS){
+        if (map_result == MAP_OUT_OF_MEMORY){
+            return ELECTION_OUT_OF_MEMORY;
+        }
+        if (map_result == MAP_NULL_ARGUMENT){
+            return ELECTION_NULL_ARGUMENT;
+        }
+
     }
     if (!election->area_votes){
         election->area_votes = createArea(election->tribes, area_id);
@@ -166,10 +178,14 @@ ElectionResult electionSetTribeName (Election election, int tribe_id, const char
     if (!validNameTribe(tribe_name)){
         return ELECTION_INVALID_NAME;
     }
-
-    if (mapPut(election->tribes, tribe_id_new, tribe_name) != MAP_SUCCESS){
-        electionDestroy(election);
-        return ELECTION_OUT_OF_MEMORY;
+    MapResult map_result = mapPut(election->tribes, tribe_id_new, tribe_name);
+    if (map_result != MAP_SUCCESS){
+        if (map_result == MAP_NULL_ARGUMENT){
+            return ELECTION_NULL_ARGUMENT;
+        }
+        if (map_result == MAP_OUT_OF_MEMORY){
+            return ELECTION_OUT_OF_MEMORY;
+        }
     }
 
     return ELECTION_SUCCESS;
@@ -191,12 +207,19 @@ ElectionResult electionRemoveTribe (Election election, int tribe_id){
     if (!mapContains(election->tribes, tribe_id_new)){
         return ELECTION_TRIBE_NOT_EXIST;
     }
-
-    removeTribe(election->area_votes, tribe_id);
-
-    if (mapRemove(election->tribes, tribe_id_new) != MAP_SUCCESS){
-        electionDestroy(election);
-        return ELECTION_OUT_OF_MEMORY;
+    if (election->area_votes != NULL){
+        if (removeTribe(election->area_votes, tribe_id) != AREA_SUCCESS){
+            return ELECTION_ERROR;
+        }
+    }
+    MapResult map_result = mapRemove(election->tribes, tribe_id_new);
+    if (map_result != MAP_SUCCESS){
+        if (map_result == MAP_NULL_ARGUMENT){
+            return ELECTION_NULL_ARGUMENT;
+        }
+        if (map_result == MAP_ITEM_DOES_NOT_EXIST){
+            return ELECTION_ERROR;
+        }
     }
 
     return ELECTION_SUCCESS;
@@ -212,21 +235,42 @@ ElectionResult electionRemoveAreas(Election election, AreaConditionFunction shou
 
     while (current_area){
         int area_id = 0;
-        sscanf(current_area, "%d", &area_id);
+        if (sscanf(current_area, "%d", &area_id) != 1){
+           return ELECTION_ERROR;
+        }
+
 
         if (should_delete_area(area_id)){
-            if (mapRemove(election->areas, current_area) != MAP_SUCCESS){
-                return ELECTION_OUT_OF_MEMORY;
-            }
-            if (mapGetSize(election->areas)==1){
-                if (removeArea(&election->area_votes, area_id) != AREA_SUCCESS){
+            MapResult map_result = mapRemove(election->areas, current_area);
+            if (map_result != MAP_SUCCESS){
+                if (map_result != MAP_NULL_ARGUMENT){
                     return ELECTION_NULL_ARGUMENT;
+                }
+                if (map_result != MAP_ITEM_DOES_NOT_EXIST){
+                    return ELECTION_ERROR;
+                }
+            }
+            if (mapGetSize(election->areas)==0){
+                AreaResult area_result = removeArea(&election->area_votes, area_id);
+                if (area_result != AREA_SUCCESS){
+                    if (area_result == AREA_NULL_ARGUMENT){
+                        return ELECTION_NULL_ARGUMENT;
+                    }
+                    if (area_result == AREA_NOT_EXIST){
+                        return ELECTION_ERROR;
+                    }
                 }
                 election->area_votes = NULL;
                 return ELECTION_SUCCESS;
             }else{
-                if (removeArea(&election->area_votes, area_id) != AREA_SUCCESS){
-                    return ELECTION_NULL_ARGUMENT;
+                AreaResult area_result = removeArea(&election->area_votes, area_id);
+                if (area_result != AREA_SUCCESS){
+                    if (area_result == AREA_NULL_ARGUMENT){
+                        return ELECTION_NULL_ARGUMENT;
+                    }
+                    if (area_result == AREA_NOT_EXIST){
+                        return ELECTION_ERROR;
+                    }
                 }
                 current_area = mapGetFirst(election->areas);
                 continue;
@@ -266,9 +310,14 @@ ElectionResult electionAddVote (Election election, int area_id, int tribe_id, in
     if (!mapContains(election->tribes, tribe_id_new)){
         return ELECTION_TRIBE_NOT_EXIST;
     }
-
-    if (editTribeVotes(election->area_votes, tribe_id, area_id, num_of_votes, true) != AREA_SUCCESS){
-        return ELECTION_NULL_ARGUMENT;
+    AreaResult area_result = editTribeVotes(election->area_votes, tribe_id, area_id, num_of_votes, true);
+    if (area_result != AREA_SUCCESS){
+        if (area_result == AREA_NULL_ARGUMENT){
+            return ELECTION_NULL_ARGUMENT;
+        }
+        if (area_result == AREA_OR_TRIBE_NOT_EXIST){
+            return ELECTION_ERROR;
+        }
     }
 
     return ELECTION_SUCCESS;
@@ -301,9 +350,17 @@ ElectionResult electionRemoveVote(Election election, int area_id, int tribe_id, 
     if (!mapContains(election->tribes, tribe_id_new)){
         return ELECTION_TRIBE_NOT_EXIST;
     }
-
-    if (editTribeVotes(election->area_votes, tribe_id, area_id, num_of_votes, false) != AREA_SUCCESS){
-        return ELECTION_NULL_ARGUMENT;
+    AreaResult area_result = editTribeVotes(election->area_votes, tribe_id, area_id, num_of_votes, false);
+    if (area_result != AREA_SUCCESS){
+        if (area_result == AREA_NULL_ARGUMENT){
+            return ELECTION_NULL_ARGUMENT;
+        }
+        if (area_result == AREA_OR_TRIBE_NOT_EXIST){
+            return ELECTION_ERROR;
+        }
+        if (area_result == AREA_INVALID_VOTES){
+            return ELECTION_INVALID_VOTES;
+        }
     }
 
     return ELECTION_SUCCESS;
@@ -332,11 +389,16 @@ Map electionComputeAreasToTribesMapping (Election election){
         sprintf(area_id_new, "%d", getAreaId(current_area));
 
         char tribe_id_max[MAX_DIGITS_INT] = "";
+        int tribe_id_temp = 0;
 
-        if (computePopularTribe(election->area_votes, getAreaId(current_area), tribe_id_max) != AREA_SUCCESS){
+        if (computePopularTribe(election->area_votes, getAreaId(current_area), &tribe_id_temp) != AREA_SUCCESS){
             mapDestroy(votes_results);
             return NULL;
         }
+        if (tribe_id_temp == NO_TRIBES){
+            return votes_results;
+        }
+        sprintf(tribe_id_max, "%d", tribe_id_temp);
         if (mapPut(votes_results, area_id_new, tribe_id_max) != MAP_SUCCESS){
             if (mapClear(votes_results) != MAP_SUCCESS){
                 return NULL;

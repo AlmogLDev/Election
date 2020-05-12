@@ -164,7 +164,6 @@ MapResult mapPut(Map map, const char* key, const char* data){
         return MAP_NULL_ARGUMENT;
     }
 
-    assert(map->info != NULL);
     GO_TO_FIRST_ELEMENT
 
     if (!map->info->key){

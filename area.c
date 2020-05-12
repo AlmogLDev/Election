@@ -1,9 +1,10 @@
 
 #include "area.h"
+#include <assert.h>
 
 #define NO_VOTES 0
-#define MAX_DIGITS_INT 10
-
+#define MAX_DIGITS_INT 12
+#define INVALID_ID -1
 
 struct node_a {
 
@@ -14,10 +15,11 @@ struct node_a {
 };
 
 
-
-
 AreaResult editTribeVotes (Area area_votes, const int tribe_id, const int area_id, int number_of_votes, bool add){
 
+    if (number_of_votes<=0){
+        return AREA_INVALID_VOTES;
+    }
     if (!area_votes){
         return AREA_NULL_ARGUMENT;
     }
@@ -31,8 +33,13 @@ AreaResult editTribeVotes (Area area_votes, const int tribe_id, const int area_i
             while (current_tribe){
 
                 if (getTribeId(current_tribe) == tribe_id){
-                    if (setNumberOfVotes(current_tribe, number_of_votes, add) != TRIBE_SUCCESS){
-                        return AREA_NULL_ARGUMENT;
+                    TribeResult tribe_result = setNumberOfVotes(current_tribe, number_of_votes, add);
+                    if (tribe_result == TRIBE_INVALID_VOTES){
+                        return AREA_INVALID_VOTES;
+                    }else{
+                        if (tribe_result != TRIBE_SUCCESS){
+                            return AREA_NULL_ARGUMENT;
+                        }
                     }
                     return AREA_SUCCESS;
                 }
@@ -51,19 +58,30 @@ AreaResult editTribeVotes (Area area_votes, const int tribe_id, const int area_i
 
 AreaResult removeTribe (Area area_votes, const int tribe_id){
 
+    if (area_votes == NULL){
+        return AREA_NULL_ARGUMENT;
+    }
     Area current_area = area_votes;
 
     while(current_area){
         Tribe current_tribe = current_area->tribe_votes;
 
-        if (!(getNextTribe(current_tribe))){
+        if (getNextTribe(current_tribe) == NULL){
             if (getTribeId(current_tribe) == tribe_id){
                 if (destroyTribeList(current_tribe) != TRIBE_SUCCESS)
                     return AREA_NULL_ARGUMENT;
                 current_area->tribe_votes = NULL;
             }
         }else{
+            if (getTribeId(current_tribe) == tribe_id){
+                current_area->tribe_votes = getNextTribe(current_tribe);
+                if (deleteFirstTribe(current_tribe) != TRIBE_SUCCESS){
+                    return AREA_NULL_ARGUMENT;
+                }
 
+                continue;
+            }
+            assert(current_tribe!=NULL);
             while (getNextTribe(current_tribe)){
                 if (getTribeId(getNextTribe(current_tribe)) == tribe_id){
                     if (deleteNextTribe(current_tribe) != TRIBE_SUCCESS){
@@ -124,7 +142,14 @@ AreaResult destroyAreaList(Area first) {
 
     while (first) {
         Area temp = first;
-        destroyTribeList(first->tribe_votes);
+        if (first->tribe_votes == NULL){
+            first = first->next;
+            free(temp);
+            continue;
+        }
+        if (destroyTribeList(first->tribe_votes) != TRIBE_SUCCESS){
+            return AREA_NULL_ARGUMENT;
+        }
         first = first->next;
         free(temp);
     }
@@ -137,7 +162,7 @@ Area createArea(Map tribes, int area_id) {
         return NULL;
     }
     Area new_area = malloc(sizeof(*new_area));
-    if (!new_area){
+    if (new_area == NULL){
         return NULL;
     }
     new_area->area_id = area_id;
@@ -151,10 +176,14 @@ Area createArea(Map tribes, int area_id) {
     char* tribe_id = mapGetFirst(tribes);
     int tribe_id_int = 0;
 
-    sscanf(tribe_id, "%d", &tribe_id_int);
+    if (sscanf(tribe_id, "%d", &tribe_id_int) != 1){
+        free (new_area);
+        return NULL;
+    }
 
     Tribe current_tribe = createTribe(tribe_id_int, NO_VOTES);
     if (!current_tribe) {
+        free (new_area);
         return NULL;
     }
     Tribe head = current_tribe;
@@ -164,16 +193,23 @@ Area createArea(Map tribes, int area_id) {
         tribe_id = mapGetNext(tribes);
 
         int tribe_id_int = 0;
-        sscanf(tribe_id, "%d", &tribe_id_int);
+        if (sscanf(tribe_id, "%d", &tribe_id_int) != 1){
+           destroyTribeList(head);
+           free(new_area);
+           return NULL;
+        }
 
         Tribe temp = createTribe(tribe_id_int, NO_VOTES);
         if (!temp) {
             if (destroyTribeList(head) != TRIBE_SUCCESS){
+                free(new_area);
                 return NULL;
             }
             return NULL;
         }
         if (setNextTribe(current_tribe, temp) != TRIBE_SUCCESS){
+            destroyTribeList(head);
+            free(new_area);
             return NULL;
         }
         current_tribe = getNextTribe(current_tribe);
@@ -211,19 +247,13 @@ AreaResult removeArea(Area *area_votes, const int area_id) {
     }
     Area current_area = *area_votes;
 
-    if (!current_area->next) { //TODO: only one area
+    if (!current_area->next) {
         if (current_area->area_id == area_id) {
-            if (destroyTribeList(current_area->tribe_votes) != TRIBE_SUCCESS){
-                if (destroyAreaList(current_area) != AREA_SUCCESS){
-                    return AREA_NULL_ARGUMENT;
-                }
-                return AREA_SUCCESS;
-            }
-            if (destroyAreaList(current_area) != AREA_SUCCESS){
-                return AREA_NULL_ARGUMENT;
-            }
+            destroyTribeList(current_area->tribe_votes);
+            free(current_area);
             return AREA_SUCCESS;
         }
+        return AREA_NOT_EXIST;
     }
 
     if (current_area->area_id == area_id){
@@ -262,26 +292,23 @@ bool validNameArea(const char *area_name) {
     return true;
 }
 
-AreaResult computePopularTribe(Area area_votes, int area_id, char *tribe_id_new) {
+AreaResult computePopularTribe(Area area_votes, int area_id, int *tribe_id_result) {
 
     if (!area_votes){
+        *tribe_id_result = 0;
         return AREA_NULL_ARGUMENT;
     }
     Area current_area = area_votes;
-
-    if (!current_area) {
-        *tribe_id_new = '\0';
-    }
 
     while (current_area) {
         if (current_area->area_id == area_id) {
             Tribe current_tribe = current_area->tribe_votes;
             if (!current_tribe) {
-                *tribe_id_new = '\0';
+                *tribe_id_result = 0;
             }
 
-            int max = 0;
-            int max_tribe_id = 0;
+            int max = -1;
+            int max_tribe_id = -1;
 
             while (current_tribe) {
 
@@ -298,7 +325,7 @@ AreaResult computePopularTribe(Area area_votes, int area_id, char *tribe_id_new)
 
                 current_tribe = getNextTribe(current_tribe);
             }
-            sprintf(tribe_id_new, "%d", max_tribe_id);
+            *tribe_id_result = max_tribe_id;
 
             return AREA_SUCCESS;
         }
@@ -307,16 +334,22 @@ AreaResult computePopularTribe(Area area_votes, int area_id, char *tribe_id_new)
 
     }
 
-    *tribe_id_new = '\0';
+    *tribe_id_result = 0;
     return AREA_NOT_EXIST;
 }
 
 Area getNextArea (Area current_area){
 
+    if(current_area == NULL){
+        return NULL;
+    }
     return current_area->next;
 }
 
 int getAreaId (Area current_area){
 
+    if(current_area == NULL){
+        return INVALID_ID;
+    }
     return current_area->area_id;
 }
